@@ -1,5 +1,6 @@
 import os
 import json
+import cv2
 import yaml
 import scipy
 import pickle
@@ -55,6 +56,7 @@ class Mixed_CBCT_dataset(Dataset):
         print('mixed_dataset:', dst_list)
         self.name_list = dst_list
         self.datasets = []
+        self.xray_root = '/root/aicp-data/data-HDF5-512_ct512_plastimatch_xray/'
         for dst_name in self.name_list:
             self.datasets.append(CBCT_dataset(dst_name, **kwargs))
     
@@ -141,24 +143,53 @@ class CBCT_dataset(Dataset):
         return len(self.name_list)
     
     def sample_projections(self, name):
-        # -- load projections
-        with open(os.path.join(self.data_root, self.cfg['projections'].format(name)), 'rb') as f:
-            data = pickle.load(f)
-            projs = data['projections'] # K, 1, res^2
-            angles = data['angles']     # K,
+        # name 是 info.json 里的病例 ID，例如 "FL-140400"
+        
+        # 构建文件路径
+        path_pa = os.path.join(self.xray_root, f"{name}_xray1.pfm")
+        path_lat = os.path.join(self.xray_root, f"{name}_xray2.pfm")
+        img_pa = cv2.imread(path_pa, -1)
+        img_lat = cv2.imread(path_lat, -1)
+        if img_pa is None or img_lat is None:
+            # 打印报错路径方便调试
+            raise FileNotFoundError(f"无法读取 X-ray 文件:\n{path_pa}\n或\n{path_lat}")
 
-        # -- sample projections
-        views = np.linspace(0, len(projs), self.num_views, endpoint=False).astype(int)
-        offset = np.random.randint(len(projs) - views[-1]) if self.random_views else self.view_offset
-        views += offset
-        projs = projs[views].astype(float) / 255.
+        # 堆叠与转置,堆叠 -> [2, H, W]
+        projs = np.stack([img_pa, img_lat], axis=0)
+
+        # 几何修正: 交换 H 和 W 以适配 TIGRE/仓库的几何定义
+        projs = np.swapaxes(projs, -1, -2) 
+
+        # 归一化与维度扩展,确保数据是 float32
+        projs = projs.astype(np.float32)
+
+        # 增加通道维度 -> [2, 1, W, H] (swapaxes后宽变高)
         projs = projs[:, None, ...]
-        angles = angles[views]
+
+        # 设定角度 (弧度制)
+        # PA (-90度) 和 Lateral (0度)
+        angles = np.array([-np.pi / 2, 0.0])
+
+        return projs, angles
+    # def sample_projections(self, name):
+    #     # -- load projections
+    #     with open(os.path.join(self.data_root, self.cfg['projections'].format(name)), 'rb') as f:
+    #         data = pickle.load(f)
+    #         projs = data['projections'] # K, 1, res^2
+    #         angles = data['angles']     # K,
+
+    #     # -- sample projections
+    #     views = np.linspace(0, len(projs), self.num_views, endpoint=False).astype(int)
+    #     offset = np.random.randint(len(projs) - views[-1]) if self.random_views else self.view_offset
+    #     views += offset
+    #     projs = projs[views].astype(float) / 255.
+    #     projs = projs[:, None, ...]
+    #     angles = angles[views]
 
         # -- de-normalization [required for mixed dataset]
         # projs = projs * self.cfg['projection_norm'] / 0.2
         
-        return projs, angles
+        # return projs, angles
     
     def load_ct(self, name):
         image = read_nifti(os.path.join(self.data_root, self.cfg['image'].format(name)))

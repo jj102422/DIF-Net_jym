@@ -5,26 +5,26 @@ numTrain: 50
 numVal: 50
 
 # System configuration
-DSD: 2000.0  # Distance Source Detector      (mm)
-DSO: 1000.0  # Distance Source Origin        (mm)
+DSD: 1800.0  # Distance Source Detector      (mm)
+DSO: 1544.0  # Distance Source Origin        (mm)
 
 # Detector parameters
 nDetector: # Number of pixels              (px)
-- 256
-- 256 
+- 512
+- 512 
 dDetector: # Size of each pixel            (mm)
-- 2.0
-- 2.0
+- 1.0
+- 1.0
 
 # Image parameters
 nVoxel: # Number of voxels              (vx)
-- 256
-- 256
-- 256 
+- 512
+- 512
+- 512 
 dVoxel: # size of each voxel            (mm)
-- 0.8
-- 0.8
-- 0.8
+- 1
+- 1
+- 1
 
 # Offsets
 offOrigin: # Offset of image from origin   (mm)
