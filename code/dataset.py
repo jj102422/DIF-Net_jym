@@ -1,14 +1,14 @@
-import os
 import json
-import yaml
-import scipy
+import os
 import pickle
-import numpy as np
 from copy import deepcopy
+
+import numpy as np
+import scipy
+import torch
+import yaml
 from torch.utils.data import Dataset
-
 from utils import read_nifti
-
 
 
 class Geometry(object):
@@ -117,7 +117,10 @@ class CBCT_dataset(Dataset):
         # prepare points
         if split == 'train':
             # load blocks' coordinates [train only]
-            self.blocks = np.load(os.path.join(data_root, cfg['blocks']))
+            # self.blocks = np.load(os.path.join(data_root, cfg['blocks']))
+            # load blocks_z from z_length.json
+            with open(os.path.join(data_root, 'z_length.json'), 'r') as f:
+                self.z_length = json.load(f)
         else:
             # prepare sampling points
             points = np.mgrid[:out_res, :out_res, :out_res]
@@ -182,6 +185,45 @@ class CBCT_dataset(Dataset):
             return points, values
         else: return points
 
+    def get_block_coords(self, name, b_idx):
+        """
+        name: 文件名，用于获取 z_length
+        b_idx: 0-63 的整数
+        """
+        # 1. 获取当前 volume 的完整 shape
+        # 假设 x, y 固定 512，z 动态获取
+        shape = (self.z_length[name], 512, 512) 
+
+        # 2. 计算偏移量 offset (ox, oy, oz)
+        # 必须严格对应 generate_blocks 里的嵌套循环顺序: x->y->z
+        # x是外层(对应shape[0]), y是中层, z是内层
+        ox = b_idx // 16          # 4*4
+        oy = (b_idx % 16) // 4
+        oz = b_idx % 4
+        offset = np.array([ox, oy, oz])
+
+        # 3. 生成基础采样网格 (Base Grid)
+        # 对应原代码: np.mgrid[: shape[0]//4, : shape[1]//4, : shape[2]//4] * 4
+        # 使用 torch 提高生成速度，indexing='ij' 保证与 np.mgrid 顺序一致
+        r_x = torch.arange(shape[0] // 4) * 4
+        r_y = torch.arange(shape[1] // 4) * 4
+        r_z = torch.arange(shape[2] // 4) * 4
+        
+        grid = torch.meshgrid(r_x, r_y, r_z, indexing='ij')
+        
+        # 4. 叠加偏移并展开
+        # stack 后的 shape 为 [3, N]，N = (D//4)*(H//4)*(W//4)
+        base = torch.stack(grid, dim=0).reshape(3, -1)
+        coords = base + torch.from_numpy(offset).view(3, 1)
+
+        # 5. 转换为 float 并归一化到 [0, 1] 供 project 使用
+        # 注意：project 函数要求的 points 输入通常是 0-1 范围
+        points = coords.float().t() # 转置为 [N, 3]
+        points[:, 0] /= shape[0]
+        points[:, 1] /= shape[1]
+        points[:, 2] /= shape[2]
+
+        return points.numpy() # 如果后续 project 接收 numpy 则转换，否则直接返回 tensor
     def __getitem__(self, index):
         name = self.name_list[index]
 
@@ -194,9 +236,9 @@ class CBCT_dataset(Dataset):
             image = self.load_ct(name)
             p_gt = np.zeros(len(points))
         else:
-            b_idx = np.random.randint(len(self.blocks))
+            b_idx = np.random.randint(64) 
+            block_coords = self.get_block_coords(name,b_idx)
             block_values = self.load_block(name, b_idx)
-            block_coords = self.blocks[b_idx] # N, 3
             points, p_gt = self.sample_points(block_coords, block_values)
 
         # -- project points and view direction
