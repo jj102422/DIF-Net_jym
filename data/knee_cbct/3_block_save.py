@@ -52,7 +52,7 @@ if __name__ == "__main__":
         block_list = generate_blocks(image.shape)
         blocks = np.stack(block_list, axis=0)  # K, 3, N^3
         blocks = blocks.transpose(0, 2, 1).astype(float) / 511  # K, N^3, 3
-        np.savez(os.path.join(save_dir, f"blocks.npz"), blocks=blocks)
+        # np.savez(os.path.join(save_dir, f"blocks.npz"), blocks=blocks)
         for k, block in enumerate(block_list):
             block = block.reshape(3, -1).transpose(1, 0)
             image_block = image[block[:, 0], block[:, 1], block[:, 2]]
