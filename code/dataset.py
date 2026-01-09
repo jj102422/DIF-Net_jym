@@ -5,6 +5,7 @@ import scipy
 import os
 import pickle
 from copy import deepcopy
+import h5py
 
 import numpy as np
 import scipy
@@ -16,22 +17,26 @@ from utils import read_nifti
 
 class Geometry(object):
     def __init__(self, config):
-        self.v_res = config['nVoxel'][0]    # ct scan
-        self.p_res = config['nDetector'][0] # projections
-        self.v_spacing = np.array(config['dVoxel'])[0]    # mm
-        self.p_spacing = np.array(config['dDetector'])[0] # mm
-
+        self.v_res = np.array(config['nVoxel'])     # [X, Y, Z]
+        self.p_res = config['nDetector'][0]         # projections
+        self.v_spacing = np.array(config['dVoxel']) # [sx, sy, sz]
+        self.p_spacing = np.array(config['dDetector'])[0]
         self.DSO = config['DSO'] # mm
         self.DSD = config['DSD'] # mm
 
-    def project(self, points, angle):
+    def project(self, points, angle, scale_tensor=None):
         # points: [N, 3] ranging from [0, 1]
         # d_points: [N, 2] ranging from [-1, 1]
 
         points = deepcopy(points).astype(float)
         points[:, :2] -= 0.5 # [-0.5, 0.5]
-        points[:, 2] = 0.5 - points[:, 2] # [-0.5, 0.5]
-        points *= self.v_res * self.v_spacing # mm
+        points[:, 2] =  -(points[:, 2]- max(points[:, 2])/2) # [-z/2, z/2]
+        # points *= self.v_res * self.v_spacing # mm
+        physical_size = self.v_res * self.v_spacing
+        if scale_tensor is not None:
+             physical_size = physical_size * scale_tensor
+        
+        points *= physical_size
 
         angle = -1 * angle # inverse direction
         rot_M = np.array([
@@ -102,6 +107,8 @@ class CBCT_dataset(Dataset):
         ):
         super().__init__()
         dst_root = './data'
+        self.xray_root = '/root/aicp-data/data-HDF5-512_ct512_plastimatch_xray/'
+        self.ct_root = '/home/public/CTSpine1K/data/ct512/'
         
         # load dataset info
         if dst_name in ['knee_cbct']:
@@ -148,33 +155,26 @@ class CBCT_dataset(Dataset):
         return len(self.name_list)
     
     def sample_projections(self, name):
-        # name 是 info.json 里的病例 ID，例如 "FL-140400"
-        
         # 构建文件路径
         path_pa = os.path.join(self.xray_root, f"{name}_xray1.pfm")
         path_lat = os.path.join(self.xray_root, f"{name}_xray2.pfm")
+        
+        # 检查文件是否存在
+        if not os.path.exists(path_pa) or not os.path.exists(path_lat):
+             raise FileNotFoundError(f"Missing X-ray files for {name}")
+
         img_pa = cv2.imread(path_pa, -1)
         img_lat = cv2.imread(path_lat, -1)
-        if img_pa is None or img_lat is None:
-            # 打印报错路径方便调试
-            raise FileNotFoundError(f"无法读取 X-ray 文件:\n{path_pa}\n或\n{path_lat}")
-
-        # 堆叠与转置,堆叠 -> [2, H, W]
+        
         projs = np.stack([img_pa, img_lat], axis=0)
-
-        # 几何修正: 交换 H 和 W 以适配 TIGRE/仓库的几何定义
+        
+        # 几何修正 (H, W 互换)
         projs = np.swapaxes(projs, -1, -2) 
-
-        # 归一化与维度扩展,确保数据是 float32
+        
         projs = projs.astype(np.float32)
+        projs = projs[:, None, ...] # [2, 1, W, H]
 
-        # 增加通道维度 -> [2, 1, W, H] (swapaxes后宽变高)
-        projs = projs[:, None, ...]
-
-        # 设定角度 (弧度制)
-        # PA (-90度) 和 Lateral (0度)
         angles = np.array([-np.pi / 2, 0.0])
-
         return projs, angles
     # def sample_projections(self, name):
     #     # -- load projections
@@ -196,67 +196,81 @@ class CBCT_dataset(Dataset):
         
         # return projs, angles
     
+    def normalize_hu(self, data):
+        min_val = -1000.0  # 骨窗下限
+        max_val = 3000.0   # 骨窗上限
+        data = np.clip(data, min_val, max_val)
+        data = (data - min_val) / (max_val - min_val)
+        return data
+    
     def load_ct(self, name):
+        path = os.path.join(self.ct_root, name, 'ct_xray_data.h5')
+        try:
+           with h5py.File(path, 'r') as f:
+                image = f['ct'][:] 
+        except Exception as e:
+            raise FileNotFoundError(f"无法读取 H5 文件: {path}. 错误: {e}")
         image = read_nifti(os.path.join(self.data_root, self.cfg['image'].format(name)))
-        image = image.astype(np.float32) / 255.
+        image = image.astype(np.float32)
+        image = self.normalize_hu(image)
+        image = np.transpose(image, (2, 1, 0))
         if self.out_res == 128:
             image = scipy.ndimage.zoom(image, 0.5, order=3, prefilter=False)
         elif self.out_res != 256:
-            raise ValueError
+            # 允许 512 或其他分辨率
+            pass
         return image
     
     def load_block(self, name, b_idx):
         path = os.path.join(self.data_root, self.cfg['image_block'].format(name, b_idx))
-        return np.load(path)
-
+        return np.load(path)['arr_0']
+    
     def sample_points(self, points, values=None):
         choice = np.random.choice(len(points), size=self.npoint, replace=False)
         points = points[choice]
         if values is not None:
             values = values[choice]
-            values = values.astype(float) / 255.
+            values = values.astype(float)
+            values = self.normalize_hu(values)
             return points, values
         else: return points
 
     def get_block_coords(self, name, b_idx):
         """
-        name: 文件名，用于获取 z_length
-        b_idx: 0-63 的整数
+        生成对应 Block 的 3D 坐标
         """
-        # 1. 获取当前 volume 的完整 shape
-        # 假设 x, y 固定 512，z 动态获取
-        shape = (self.z_length[name], 512, 512) 
+        # 【修正 1】形状必须是 (512, 512, z_len)
+        # 对应你之前代码中的 np.transpose(image, (2, 1, 0)) -> (X, Y, Z)
+        z_len = self.z_length[name]
+        shape = (512, 512, z_len) 
 
-        # 2. 计算偏移量 offset (ox, oy, oz)
-        # 必须严格对应 generate_blocks 里的嵌套循环顺序: x->y->z
-        # x是外层(对应shape[0]), y是中层, z是内层
-        ox = b_idx // 16          # 4*4
+        # 计算 offset (对应 generate_blocks 里的 x, y, z 循环顺序)
+        ox = b_idx // 16          
         oy = (b_idx % 16) // 4
         oz = b_idx % 4
         offset = np.array([ox, oy, oz])
 
-        # 3. 生成基础采样网格 (Base Grid)
-        # 对应原代码: np.mgrid[: shape[0]//4, : shape[1]//4, : shape[2]//4] * 4
-        # 使用 torch 提高生成速度，indexing='ij' 保证与 np.mgrid 顺序一致
+        # 【修正 2】生成网格
+        # torch.meshgrid 配合 indexing='ij' 能够模拟 np.mgrid 的行为
+        # 形状对应 shape: (X, Y, Z)
         r_x = torch.arange(shape[0] // 4) * 4
         r_y = torch.arange(shape[1] // 4) * 4
         r_z = torch.arange(shape[2] // 4) * 4
         
         grid = torch.meshgrid(r_x, r_y, r_z, indexing='ij')
         
-        # 4. 叠加偏移并展开
-        # stack 后的 shape 为 [3, N]，N = (D//4)*(H//4)*(W//4)
+        # 堆叠并展开 -> [3, N]
         base = torch.stack(grid, dim=0).reshape(3, -1)
         coords = base + torch.from_numpy(offset).view(3, 1)
 
-        # 5. 转换为 float 并归一化到 [0, 1] 供 project 使用
-        # 注意：project 函数要求的 points 输入通常是 0-1 范围
-        points = coords.float().t() # 转置为 [N, 3]
+        # 归一化到 [0, 1]
+        points = coords.float().t() # [N, 3]
         points[:, 0] /= shape[0]
         points[:, 1] /= shape[1]
         points[:, 2] /= shape[2]
 
-        return points.numpy() # 如果后续 project 接收 numpy 则转换，否则直接返回 tensor
+        return points.numpy()
+    
     def __getitem__(self, index):
         name = self.name_list[index]
 
@@ -273,18 +287,26 @@ class CBCT_dataset(Dataset):
             block_coords = self.get_block_coords(name,b_idx)
             block_values = self.load_block(name, b_idx)
             points, p_gt = self.sample_points(block_coords, block_values)
+            # 【修正 3】计算 Z 轴缩放比例
+            # Config 中的 nVoxel[2] 是 512，但实际 Z 是 z_len
+            # 我们需要告诉 project 函数，这个物体的 Z 轴只有 z_len 那么长
+            config_z = self.geo.v_res[2] # 512
+            real_z = self.z_length[name]
+            z_scale = real_z / config_z
 
         # -- project points and view direction
+        # 构造缩放向量 [1, 1, z_scale]
+        scale_vec = np.array([1.0, 1.0, z_scale]) if self.is_train else None
         proj_points = []
         for a in angles:
-            p = self.geo.project(points, a)
+            p = self.geo.project(points, a, scale_tensor=scale_vec)
             proj_points.append(p)
         proj_points = np.stack(proj_points, axis=0) # M, N, 2
         
         # -- normalize points
         points = deepcopy(points) # ~[0, 1]
         points[:, :2] -= 0.5 # [-0.5, 0.5]
-        points[:, 2] = 0.5 - points[:, 2] # [-0.5, 0.5]
+        points[:, 2] =  -(points[:, 2]- max(points[:, 2])/2) # [-z/2, z/2]
         points *= 2 # => [-1, 1]
 
         # -- normalize viewing angles
@@ -310,3 +332,6 @@ if __name__ == '__main__':
     dst = CBCT_dataset(dst_name='knee_zhao', random_views=True, num_views=10)
     item = dst[0]
     import pdb; pdb.set_trace()
+    print("Points Shape:", item['points'].shape)
+    print("Projections Shape:", item['projs'].shape)
+    print("Projected Points Shape:", item['proj_points'].shape)
