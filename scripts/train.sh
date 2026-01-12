@@ -1,5 +1,5 @@
 gpu=0
-name=dif-net
+name=dif-net_CTSpine1K
 dst_list=knee_cbct
 n_view=10
 
