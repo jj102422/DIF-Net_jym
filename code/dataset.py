@@ -1,29 +1,32 @@
-import os
 import json
 import cv2
 import h5py
 import yaml
 import scipy
+import os
 import pickle
-import numpy as np
 from copy import deepcopy
-from torch.utils.data import Dataset
+import h5py
 
+import numpy as np
+import scipy
+import torch
+import yaml
+from torch.utils.data import Dataset
 from utils import read_nifti
 
 # 运行指令：bash scripts/train.sh
 
 class Geometry(object):
     def __init__(self, config):
-        self.v_res = config['nVoxel'][0]    # ct scan
-        self.p_res = config['nDetector'][0] # projections
-        self.v_spacing = np.array(config['dVoxel'])[0]    # mm
-        self.p_spacing = np.array(config['dDetector'])[0] # mm
-
+        self.v_res = np.array(config['nVoxel'])     # [X, Y, Z]
+        self.p_res = config['nDetector'][0]         # projections
+        self.v_spacing = np.array(config['dVoxel']) # [sx, sy, sz]
+        self.p_spacing = np.array(config['dDetector'])[0]
         self.DSO = config['DSO'] # mm
         self.DSD = config['DSD'] # mm
 
-    def project(self, points, angle):
+    def project(self, points, angle, scale_tensor=None):
         # points: [N, 3] ranging from [0, 1]
         # d_points: [N, 2] ranging from [-1, 1]
 
@@ -57,6 +60,7 @@ class Mixed_CBCT_dataset(Dataset):
         print('mixed_dataset:', dst_list)
         self.name_list = dst_list
         self.datasets = []
+        self.xray_root = '/root/aicp-data/data-HDF5-512_ct512_plastimatch_xray/'
         for dst_name in self.name_list:
             self.datasets.append(CBCT_dataset(dst_name, **kwargs))
     
@@ -100,6 +104,8 @@ class CBCT_dataset(Dataset):
         ):
         super().__init__()
         dst_root = './data'
+        self.xray_root = '/root/aicp-data/data-HDF5-512_ct512_plastimatch_xray/'
+        self.ct_root = '/home/public/CTSpine1K/data/ct512/'
         
         # load dataset info
         if dst_name in ['knee_cbct']:
@@ -190,7 +196,14 @@ class CBCT_dataset(Dataset):
         # 固定角度: 0度 (PA) 和 90度 (Lateral)，对应弧度 [0, pi/2]
         angles = np.array([0.0, np.pi/2], dtype=np.float32)
         
-        return projs, angles
+        # return projs, angles
+    
+    def normalize_hu(self, data):
+        min_val = -1000.0  # 骨窗下限
+        max_val = 3000.0   # 骨窗上限
+        data = np.clip(data, min_val, max_val)
+        data = (data - min_val) / (max_val - min_val)
+        return data
     
     def load_ct(self, name):
         # 验证集路径 (硬编码)
@@ -343,7 +356,7 @@ class CBCT_dataset(Dataset):
         # -- project points
         proj_points = []
         for a in angles:
-            p = self.geo.project(points, a)
+            p = self.geo.project(points, a, scale_tensor=scale_vec)
             proj_points.append(p)
         proj_points = np.stack(proj_points, axis=0) 
         points = deepcopy(points) 
@@ -373,3 +386,6 @@ if __name__ == '__main__':
     dst = CBCT_dataset(dst_name='knee_zhao', random_views=True, num_views=10)
     item = dst[0]
     import pdb; pdb.set_trace()
+    print("Points Shape:", item['points'].shape)
+    print("Projections Shape:", item['projs'].shape)
+    print("Projected Points Shape:", item['proj_points'].shape)
