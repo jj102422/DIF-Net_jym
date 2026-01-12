@@ -51,7 +51,7 @@ if __name__ == '__main__':
             dst_list=dst_list,
             split='eval',
             num_views=args.num_views,
-            out_res=128, # low-res evaluation is faster
+            out_res=512, # low-res evaluation is faster
         ), 
         batch_size=1, 
         shuffle=False,

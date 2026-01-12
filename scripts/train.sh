@@ -1,7 +1,7 @@
 gpu=0
 name=dif-net_CTSpine1K
 dst_list=knee_cbct
-n_view=10
+n_view=2
 
 mkdir -p ./logs/$name
 
