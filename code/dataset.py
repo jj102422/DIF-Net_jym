@@ -26,13 +26,13 @@ class Geometry(object):
         self.DSO = config['DSO'] # mm
         self.DSD = config['DSD'] # mm
 
-    def project(self, points, angle, scale_tensor=None):
+    def project(self, points, angle, scale_tensor=None, max_z=None):
         # points: [N, 3] ranging from [0, 1]
         # d_points: [N, 2] ranging from [-1, 1]
 
         points = deepcopy(points).astype(float)
         points[:, :2] -= 0.5 # [-0.5, 0.5]
-        points[:, 2] = -(points[:, 2] - np.max(points[:, 2])/2) # [-0.5, 0.5]
+        points[:, 2] = -(points[:, 2] - max_z/2)# [-0.5, 0.5]
         points *= self.v_res * self.v_spacing # mm
 
         angle = -1 * angle # inverse direction
@@ -152,7 +152,7 @@ class CBCT_dataset(Dataset):
         # 注意：源数据中有 -258 的值，会被 clip 为 0
         min_val = 0.0
         max_val = 2500.0
-        data = np.clip(data, min_val, max_val)
+        data = np.clip(data, min_val, None)
         data = (data - min_val) / (max_val - min_val)
         
         return data
@@ -194,7 +194,7 @@ class CBCT_dataset(Dataset):
         projs = projs[:, None, ...]
         
         # 固定角度: 0度 (PA) 和 90度 (Lateral)，对应弧度 [0, pi/2]
-        angles = np.array([0.0, np.pi/2], dtype=np.float32)
+        angles = np.array([np.pi/2, 0.0], dtype=np.float32)
         
         return projs, angles
     
