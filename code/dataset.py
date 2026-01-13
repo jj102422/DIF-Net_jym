@@ -26,13 +26,13 @@ class Geometry(object):
         self.DSO = config['DSO'] # mm
         self.DSD = config['DSD'] # mm
 
-    def project(self, points, angle, scale_tensor=None):
+    def project(self, points, angle, scale_tensor=None, max_z=None):
         # points: [N, 3] ranging from [0, 1]
         # d_points: [N, 2] ranging from [-1, 1]
 
         points = deepcopy(points).astype(float)
         points[:, :2] -= 0.5 # [-0.5, 0.5]
-        points[:, 2] =  -(points[:, 2]- max(points[:, 2])/2) # [-0.5, 0.5]
+        points[:, 2] = -(points[:, 2] - max_z/2)# [-0.5, 0.5]
         points *= self.v_res * self.v_spacing # mm
 
         angle = -1 * angle # inverse direction
@@ -103,7 +103,7 @@ class CBCT_dataset(Dataset):
             view_offset=0
         ):
         super().__init__()
-        dst_root = './data'
+        dst_root = '/root/aicp-data/DIF-Net_jym/data'
         self.xray_root = '/root/aicp-data/data-HDF5-512_ct512_plastimatch_xray/'
         self.ct_root = '/home/public/CTSpine1K/data/ct512/'
         
@@ -152,7 +152,7 @@ class CBCT_dataset(Dataset):
         # 注意：源数据中有 -258 的值，会被 clip 为 0
         min_val = 0.0
         max_val = 2500.0
-        data = np.clip(data, min_val, max_val)
+        data = np.clip(data, min_val, None)
         data = (data - min_val) / (max_val - min_val)
         
         return data
@@ -194,16 +194,9 @@ class CBCT_dataset(Dataset):
         projs = projs[:, None, ...]
         
         # 固定角度: 0度 (PA) 和 90度 (Lateral)，对应弧度 [0, pi/2]
-        angles = np.array([0.0, np.pi/2], dtype=np.float32)
+        angles = np.array([np.pi/2, 0.0], dtype=np.float32)
         
-        # return projs, angles
-    
-    def normalize_hu(self, data):
-        min_val = -1000.0  # 骨窗下限
-        max_val = 3000.0   # 骨窗上限
-        data = np.clip(data, min_val, max_val)
-        data = (data - min_val) / (max_val - min_val)
-        return data
+        return projs, angles
     
     def load_ct(self, name):
         # 验证集路径 (硬编码)
@@ -267,45 +260,30 @@ class CBCT_dataset(Dataset):
         """
         根据 b_idx 和 z_length 动态计算坐标，并与 block_values 匹配
         """
-        # 1. 获取 Z 轴长度
         z_len = self.z_lengths[name]
         
-        # 2. 确定形状 (严格对应 3_block_save.py 的保存形状)
-        # 生成脚本里做了 transpose(2,1,0)，所以是 (X, Y, Z) = (512, 512, z_len)
+        # 确定形状，transpose(2,1,0)，所以是 (X, Y, Z) = (512, 512, z_len)
         shape = (512, 512, z_len)
         
-        # 3. 基础网格大小 (Base Grid Shape)
-        # 相当于 np.mgrid 的范围
+        # 基础网格大小 (Base Grid Shape)，相当于 np.mgrid 的范围
         dx = shape[0] // 4 # 128
         dy = shape[1] // 4 # 128
         dz = shape[2] // 4 # 动态
         
-        # 4. 计算偏移量 offset (ox, oy, oz)
-        # 对应循环顺序: x(外) -> y(中) -> z(内)
-        # b_idx = x*16 + y*4 + z
+        # 计算偏移量 offset (ox, oy, oz)，b_idx = x*16 + y*4 + z
         ox = b_idx // 16          # X offset
         oy = (b_idx % 16) // 4    # Y offset
         oz = b_idx % 4            # Z offset
         
-        # 5. 【优化】随机采样索引 (Indices)
-        # 不生成全量网格，直接从总数中选索引
+        # 优化随机采样索引 (Indices)，不生成全量网格，直接从总数中选索引
         total_points = len(block_values) # Should be dx * dy * dz
-        
-        # 随机选 npoint 个索引
         choice_indices = np.random.choice(total_points, size=self.npoint, replace=False)
-        
-        # 取出对应的像素值
         sampled_values = block_values[choice_indices]
         
-        # 6. 【核心】索引转坐标 (Index -> Coordinate)
-        # 将一维索引还原为 3D 网格索引 (u, v, w)
-        # 注意：np.mgrid 是 indexing='ij'，reshape 顺序对应 C-order
-        # 所以这里的 unravel 顺序必须是 (dx, dy, dz)
+        # 索引转坐标 (Index -> Coordinate)，将一维索引还原为 3D 网格索引 (u, v, w)
         u, v, w = np.unravel_index(choice_indices, (dx, dy, dz))
         
-        # 7. 计算绝对坐标
-        # 公式: coord = grid_index * 4 + offset
-        # 对应原逻辑: r_x + offset
+        # 计算绝对坐标，公式: coord = grid_index * 4 + offset，对应原逻辑: r_x + offset
         x_abs = u * 4 + ox
         y_abs = v * 4 + oy
         z_abs = w * 4 + oz
@@ -313,12 +291,11 @@ class CBCT_dataset(Dataset):
         # 堆叠成 [N, 3]
         points = np.stack([x_abs, y_abs, z_abs], axis=1).astype(np.float32)
         
-        # 8. 归一化到 [0, 1]
-        # 除以 (总长度 - 1)
-        points[:, 0] /= (shape[0] - 1)
-        points[:, 1] /= (shape[1] - 1)
-        points[:, 2] /= (shape[2] - 1)
-        
+        # 归一化到 [0, 1]
+        points[:, 0] /= (self.out_res - 1)
+        points[:, 1] /= (self.out_res - 1)
+        points[:, 2] /= (self.out_res - 1)
+
         return points, sampled_values
 
     def __getitem__(self, index):
@@ -326,6 +303,9 @@ class CBCT_dataset(Dataset):
 
         # -- load projections
         projs, angles = self.sample_projections(name)
+        # 在这里获取 Z 轴长度，因为 scale_vec 计算需要它
+        real_z = self.z_lengths[name]
+        scale_vec = np.array([1.0, 1.0, real_z / self.out_res], dtype=np.float32)
 
         # -- load sampling points
         if not self.is_train:
@@ -334,12 +314,12 @@ class CBCT_dataset(Dataset):
             
             # 生成网格 (512, 512, real_z)
             points = np.mgrid[:self.out_res, :self.out_res, :real_z]
-            
+
             # 归一化到 [0, 1]
             points = points.astype(np.float32)
             points[0] /= (self.out_res - 1) # X
             points[1] /= (self.out_res - 1) # Y
-            points[2] /= (real_z - 1)       # Z 
+            points[2] /= (self.out_res - 1) # Z 
             
             # 变形为 (N, 3)
             points = points.reshape(3, -1).transpose(1, 0)
@@ -352,6 +332,7 @@ class CBCT_dataset(Dataset):
             b_idx = np.random.randint(64) 
             block_values = self.load_block(name, b_idx)
             points, p_gt = self.get_coords_and_values(name, b_idx, block_values)
+        max_z = (self.z_lengths[name]-1) / (self.out_res-1)
 
         # -- project points
         proj_points = []
@@ -360,8 +341,8 @@ class CBCT_dataset(Dataset):
             proj_points.append(p)
         proj_points = np.stack(proj_points, axis=0) 
         points = deepcopy(points) 
-        points[:, :2] -= 0.5 
-        points[:, 2] = -(points[:, 2] - np.max(points[:, 2])/2) 
+        points[:, :2] -= 0.5 # [-0.5, 0.5]
+        points[:, 2] = -(points[:, 2] - max_z/2)  
         points *= 2 # => [-1, 1]
 
         angles = np.array(angles, dtype=float) 
@@ -383,9 +364,10 @@ class CBCT_dataset(Dataset):
         return ret_dict
 
 if __name__ == '__main__':
-    dst = CBCT_dataset(dst_name='knee_zhao', random_views=True, num_views=10)
+    dst = CBCT_dataset(dst_name='knee_cbct', random_views=True, num_views=10)
     item = dst[0]
     import pdb; pdb.set_trace()
     print("Points Shape:", item['points'].shape)
     print("Projections Shape:", item['projs'].shape)
     print("Projected Points Shape:", item['proj_points'].shape)
+    
