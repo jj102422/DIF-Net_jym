@@ -1,13 +1,10 @@
 import json
-import cv2
-import h5py
-import yaml
-import scipy
 import os
 import pickle
 from copy import deepcopy
-import h5py
 
+import cv2
+import h5py
 import numpy as np
 import scipy
 import torch
@@ -47,7 +44,8 @@ class Geometry(object):
         d2 = self.DSD
         
         coeff = (d2) / (d1 - points[:, 0]) # N,
-        d_points = points[:, [2, 1]] * coeff[:, None] # [N, 2] float
+        d_points = points[:, [1,2]] * coeff[:, None] # [N, 2] float
+        d_points[:, 0] *= -1
         d_points /= (self.p_res * self.p_spacing)
         d_points *= 2 # NOTE: some points may fall outside [-1, 1]
 
@@ -100,10 +98,10 @@ class CBCT_dataset(Dataset):
             npoint=5000,
             out_res=256,
             random_views=False,
-            view_offset=0
+            view_offset=0,
+            dst_root='/root/aicp-data/DIF-Net_jym/data'
         ):
         super().__init__()
-        dst_root = '/root/aicp-data/DIF-Net_jym/data'
         self.xray_root = '/root/aicp-data/data-HDF5-512_ct512_plastimatch_xray/'
         self.ct_root = '/home/public/CTSpine1K/data/ct512/'
         
@@ -337,7 +335,7 @@ class CBCT_dataset(Dataset):
         # -- project points
         proj_points = []
         for a in angles:
-            p = self.geo.project(points, a, scale_tensor=scale_vec, max_z=max_z)
+            p = self.geo.project(points, a, scale_tensor=scale_vec)
             proj_points.append(p)
         proj_points = np.stack(proj_points, axis=0) 
         points = deepcopy(points) 
