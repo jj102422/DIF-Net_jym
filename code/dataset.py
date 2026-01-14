@@ -332,12 +332,12 @@ class CBCT_dataset(Dataset):
             b_idx = np.random.randint(64) 
             block_values = self.load_block(name, b_idx)
             points, p_gt = self.get_coords_and_values(name, b_idx, block_values)
-        max_z = (self.z_lengths[name]-1) / (self.out_res-1)
+        max_z = (self.z_lengths[name] - 1) / (self.out_res - 1)
 
         # -- project points
         proj_points = []
         for a in angles:
-            p = self.geo.project(points, a, scale_tensor=scale_vec)
+            p = self.geo.project(points, a, scale_tensor=scale_vec, max_z=max_z)
             proj_points.append(p)
         proj_points = np.stack(proj_points, axis=0) 
         points = deepcopy(points) 
