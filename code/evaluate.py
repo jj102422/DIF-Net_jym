@@ -36,9 +36,13 @@ def eval_one_epoch(model, loader, npoint=50000, save_dir=None, ignore_msg=True, 
             output = model(item, is_eval=True, eval_npoint=npoint) # B, 1, N
             output = output[0, 0].data.cpu().numpy()
             output = output.reshape(image.shape)
+            # 强制将 GT (image) 和 预测值 (output) 限制在 [0, 1]
+            image = np.clip(image, 0., 1.)
+            output = np.clip(output, 0., 1.)
 
-            psnr = peak_signal_noise_ratio(image, output)
-            ssim = structural_similarity(image, output)
+            # 显式指定 data_range=1.0
+            psnr = peak_signal_noise_ratio(image, output, data_range=1.0)
+            ssim = structural_similarity(image, output, data_range=1.0)
 
             if not ignore_msg:
                 print('{}, PSNR: {:.4}, SSIM: {:.4}'.format(
