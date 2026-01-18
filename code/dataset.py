@@ -192,7 +192,7 @@ class CBCT_dataset(Dataset):
         projs = projs[:, None, ...]
         
         # 固定角度: 0度 (PA) 和 90度 (Lateral)，对应弧度 [0, pi/2]
-        angles = np.array([np.pi/2, 0.0], dtype=np.float32)
+        angles = np.array([0.0, np.pi/2], dtype=np.float32)
         
         return projs, angles
     
