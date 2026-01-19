@@ -1,6 +1,7 @@
 import os
 import argparse
 import numpy as np
+import wandb
 
 import torch
 from torch import nn
@@ -22,6 +23,12 @@ if __name__ == '__main__':
     parser = add_argument(parser)
     args = parser.parse_args()
     print(args)
+    wandb.init(
+        project="dif-net_CTSpine1K（6）", # 你的项目名称
+        name=args.name,         # 实验名称
+        config=args             # 记录所有超参数
+    )
+    
 
     save_dir = f'./logs/{args.name}'
     os.makedirs(save_dir, exist_ok=True)
@@ -96,6 +103,13 @@ if __name__ == '__main__':
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
+        # 计算当前 Epoch 的平均 Train Loss 
+        avg_train_loss = np.mean(loss_list)
+        log_dict = {
+        "epoch": epoch,
+        "train/loss": avg_train_loss
+        }
+        vis_imgs = None
         # -- log loss
         if epoch % 10 == 0:
             print('epoch: {}, loss: {:.4}'.format(epoch, np.mean(loss_list)))
@@ -109,17 +123,27 @@ if __name__ == '__main__':
 
         # -- evaluation
         if epoch % 50 == 0 or (epoch >= (args.epoch - 100) and epoch % 10 == 0):
-            metrics, _ = eval_one_epoch(
+            metrics, _, vis_imgs = eval_one_epoch(
                 model, 
                 eval_loader, 
-                args.eval_npoint
+                args.eval_npoint, 
+                return_vis=True
             )
             msg = f' --- epoch {epoch}'
             for dst_name in metrics.keys():
                 msg += f', {dst_name}'
                 met = metrics[dst_name]
+                # 将验证指标加入 log_dict
+                log_dict[f"val/{dst_name}_psnr"] = met['psnr']
+                log_dict[f"val/{dst_name}_ssim"] = met['ssim']
                 for key, val in met.items():
                     msg += ', {}: {:.4}'.format(key, val)
             print(msg)
+            # 将 3 个方向的图片加入 log_dict,vis_imgs 是一个包含 [Axial, Coronal, Sagittal] wandb.Image 的列表
+            if vis_imgs is not None and 'log_dict' in locals():
+                log_dict["val/axial_view"] = vis_imgs[0]
+                log_dict["val/coronal_view"] = vis_imgs[1]
+                log_dict["val/sagittal_view"] = vis_imgs[2]
+        wandb.log(log_dict)
         
         lr_scheduler.step()

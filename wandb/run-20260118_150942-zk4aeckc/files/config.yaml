@@ -1,0 +1,95 @@
+_wandb:
+    value:
+        cli_version: 0.23.1
+        e:
+            fxffvxgtect9twgkzu3rpnpfqko22fjx:
+                args:
+                    - --name
+                    - dif-net_CTSpine1K
+                    - --batch_size
+                    - "4"
+                    - --epoch
+                    - "400"
+                    - --dst_list
+                    - knee_cbct
+                    - --num_views
+                    - "2"
+                    - --combine
+                    - mlp
+                codePath: code/train.py
+                codePathLocal: code/train.py
+                cpu_count: 64
+                cpu_count_logical: 128
+                cudaVersion: "12.6"
+                disk:
+                    /:
+                        total: "107374182400"
+                        used: "14367395840"
+                email: jym20020918@gmail.com
+                executable: /root/aicp-data/yes/envs/perx2ct/bin/python
+                git:
+                    commit: 60e5a88d635032102671f0c2363c811b44939a1f
+                    remote: https://github.com/jj102422/DIF-Net_jym.git
+                gpu: NVIDIA GeForce RTX 4090
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 16384
+                      memoryTotal: "25757220864"
+                      name: NVIDIA GeForce RTX 4090
+                      uuid: GPU-75b6c90a-ff66-1e09-fcca-705b3cf8ecb5
+                host: nb-f6v754z2rxfk-0
+                memory:
+                    total: "540648009728"
+                os: Linux-5.15.0-161-generic-x86_64-with-glibc2.17
+                program: code/train.py
+                python: CPython 3.8.20
+                root: /root/aicp-data/DIF-Net_jym
+                startedAt: "2026-01-18T15:09:42.667513Z"
+                writerId: fxffvxgtect9twgkzu3rpnpfqko22fjx
+        m: []
+        python_version: 3.8.20
+        t:
+            "1":
+                - 1
+                - 100
+            "2":
+                - 1
+                - 100
+            "3":
+                - 13
+                - 16
+            "4": 3.8.20
+            "5": 0.23.1
+            "12": 0.23.1
+            "13": linux-x86_64
+batch_size:
+    value: 4
+combine:
+    value: mlp
+dst_list:
+    value: knee_cbct
+epoch:
+    value: 400
+eval_npoint:
+    value: 100000
+lr:
+    value: 0.01
+name:
+    value: dif-net_CTSpine1K
+num_points:
+    value: 10000
+num_views:
+    value: 2
+num_workers:
+    value: 2
+out_res:
+    value: 256
+random_views:
+    value: false
+split:
+    value: test
+view_offset:
+    value: 0
+visualize:
+    value: false

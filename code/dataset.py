@@ -26,13 +26,13 @@ class Geometry(object):
         self.DSO = config['DSO'] # mm
         self.DSD = config['DSD'] # mm
 
-    def project(self, points, angle, scale_tensor=None):
+    def project(self, points, angle, scale_tensor=None, max_z=None):
         # points: [N, 3] ranging from [0, 1]
         # d_points: [N, 2] ranging from [-1, 1]
 
         points = deepcopy(points).astype(float)
         points[:, :2] -= 0.5 # [-0.5, 0.5]
-        points[:, 2] =  -(points[:, 2]- max(points[:, 2])/2) # [-0.5, 0.5]
+        points[:, 2] = -(points[:, 2] - max_z/2)# [-0.5, 0.5]
         points *= self.v_res * self.v_spacing # mm
 
         angle = -1 * angle # inverse direction
@@ -196,7 +196,7 @@ class CBCT_dataset(Dataset):
         # 固定角度: 0度 (PA) 和 90度 (Lateral)，对应弧度 [0, pi/2]
         angles = np.array([0.0, np.pi/2], dtype=np.float32)
         
-        # return projs, angles
+        return projs, angles
     
     def normalize_hu(self, data):
         min_val = -1000.0  # 骨窗下限
@@ -326,6 +326,9 @@ class CBCT_dataset(Dataset):
 
         # -- load projections
         projs, angles = self.sample_projections(name)
+        # 在这里获取 Z 轴长度，因为 scale_vec 计算需要它
+        real_z = self.z_lengths[name]
+        scale_vec = np.array([1.0, 1.0, real_z / self.out_res], dtype=np.float32)
 
         # -- load sampling points
         if not self.is_train:
@@ -352,16 +355,17 @@ class CBCT_dataset(Dataset):
             b_idx = np.random.randint(64) 
             block_values = self.load_block(name, b_idx)
             points, p_gt = self.get_coords_and_values(name, b_idx, block_values)
+        max_z = (self.z_lengths[name] - 1) / (self.out_res - 1)
 
         # -- project points
         proj_points = []
         for a in angles:
-            p = self.geo.project(points, a, scale_tensor=scale_vec)
+            p = self.geo.project(points, a, scale_tensor=scale_vec, max_z=max_z)
             proj_points.append(p)
         proj_points = np.stack(proj_points, axis=0) 
         points = deepcopy(points) 
         points[:, :2] -= 0.5 
-        points[:, 2] = -(points[:, 2] - np.max(points[:, 2])/2) 
+        points[:, 2] = -(points[:, 2] - max_z/2)  
         points *= 2 # => [-1, 1]
 
         angles = np.array(angles, dtype=float) 
