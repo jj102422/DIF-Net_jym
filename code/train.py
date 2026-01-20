@@ -25,7 +25,7 @@ if __name__ == '__main__':
     print(args)
     wandb.init(
         project="dif-net_CTSpine1K（6）", # 你的项目名称
-        name=args.name,         # 实验名称
+        name="baseline",         # 实验名称
         config=args             # 记录所有超参数
     )
     
