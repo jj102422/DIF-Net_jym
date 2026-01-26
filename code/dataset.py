@@ -1,13 +1,10 @@
 import json
-import cv2
-import h5py
-import yaml
-import scipy
 import os
 import pickle
 from copy import deepcopy
-import h5py
 
+import cv2
+import h5py
 import numpy as np
 import scipy
 import torch
@@ -26,13 +23,13 @@ class Geometry(object):
         self.DSO = config['DSO'] # mm
         self.DSD = config['DSD'] # mm
 
-    def project(self, points, angle, scale_tensor=None):
+    def project(self, points, angle, scale_tensor=None,max_z=1.0):
         # points: [N, 3] ranging from [0, 1]
         # d_points: [N, 2] ranging from [-1, 1]
 
         points = deepcopy(points).astype(float)
         points[:, :2] -= 0.5 # [-0.5, 0.5]
-        points[:, 2] =  -(points[:, 2]- max(points[:, 2])/2) # [-0.5, 0.5]
+        points[:, 2] =  -(points[:, 2]- max_z/2) # [-0.5, 0.5]
         points *= self.v_res * self.v_spacing # mm
 
         angle = -1 * angle # inverse direction
@@ -47,7 +44,8 @@ class Geometry(object):
         d2 = self.DSD
         
         coeff = (d2) / (d1 - points[:, 0]) # N,
-        d_points = points[:, [2, 1]] * coeff[:, None] # [N, 2] float
+        d_points = points[:, [1,2]] * coeff[:, None] # [N, 2] float
+        d_points[:, 0] *= -1
         d_points /= (self.p_res * self.p_spacing)
         d_points *= 2 # NOTE: some points may fall outside [-1, 1]
 
@@ -60,7 +58,7 @@ class Mixed_CBCT_dataset(Dataset):
         print('mixed_dataset:', dst_list)
         self.name_list = dst_list
         self.datasets = []
-        self.xray_root = '/root/aicp-data/data-HDF5-512_ct512_plastimatch_xray/'
+        self.xray_root = '/home/public/CTSpine1K/data/data-HDF5-512_ct512_plastimatch_xray/'
         for dst_name in self.name_list:
             self.datasets.append(CBCT_dataset(dst_name, **kwargs))
     
@@ -100,11 +98,11 @@ class CBCT_dataset(Dataset):
             npoint=5000,
             out_res=256,
             random_views=False,
-            view_offset=0
+            view_offset=0,
+            dst_root = './data'
         ):
         super().__init__()
-        dst_root = './data'
-        self.xray_root = '/root/aicp-data/data-HDF5-512_ct512_plastimatch_xray/'
+        self.xray_root = '/home/public/CTSpine1K/data/data-HDF5-512_ct512_plastimatch_xray/'
         self.ct_root = '/home/public/CTSpine1K/data/ct512/'
         
         # load dataset info
@@ -152,7 +150,7 @@ class CBCT_dataset(Dataset):
         # 注意：源数据中有 -258 的值，会被 clip 为 0
         min_val = 0.0
         max_val = 2500.0
-        data = np.clip(data, min_val, max_val)
+        # data = np.clip(data, min_val, max_val)
         data = (data - min_val) / (max_val - min_val)
         
         return data
@@ -174,7 +172,7 @@ class CBCT_dataset(Dataset):
     
     def sample_projections(self, name):
         # 硬编码读取路径
-        xray_root = "/root/aicp-data/data-HDF5-512_ct512_plastimatch_xray/"
+        xray_root = "/home/public/CTSpine1K/data/data-HDF5-512_ct512_plastimatch_xray/"
         path1 = os.path.join(xray_root, f"{name}_xray1.pfm") # PA
         path2 = os.path.join(xray_root, f"{name}_xray2.pfm") # Lateral
         p1 = cv2.imread(path1, cv2.IMREAD_UNCHANGED)
@@ -188,26 +186,26 @@ class CBCT_dataset(Dataset):
         projs = projs.astype(np.float32)
 
         # 归一化 (ImageNet Mean/Std)，数据已经是 0-1，直接标准化
-        projs = self.normalize_xray(projs)
+        # projs = self.normalize_xray(projs)
 
         # 增加通道维度 -> [2, 1, H, W]
         projs = projs[:, None, ...]
         
         # 固定角度: 0度 (PA) 和 90度 (Lateral)，对应弧度 [0, pi/2]
-        angles = np.array([0.0, np.pi/2], dtype=np.float32)
+        angles = np.array([ np.pi/2,0.0,], dtype=np.float32)
         
         return projs, angles
     
-    def normalize_hu(self, data):
-        min_val = -1000.0  # 骨窗下限
-        max_val = 3000.0   # 骨窗上限
-        data = np.clip(data, min_val, max_val)
-        data = (data - min_val) / (max_val - min_val)
-        return data
+    # def normalize_hu(self, data):
+    #     min_val = -1000.0  # 骨窗下限
+    #     max_val = 3000.0   # 骨窗上限
+    #     data = np.clip(data, min_val, None)
+    #     data = (data - min_val) / (max_val - min_val)
+    #     return data
     
     def load_ct(self, name):
         # 验证集路径 (硬编码)
-        val_root = "/root/aicp-data/val_data/"
+        val_root = "/home/public/CTSpine1K/data/ct512/"
         path = os.path.join(val_root, name, 'ct_xray_data.h5')
         
         try:
@@ -243,7 +241,7 @@ class CBCT_dataset(Dataset):
     
     def load_block(self, name, b_idx):
         """只加载数值 (Pixel Values)"""
-        block_root = "/root/aicp-data/block/" 
+        block_root = "/home/public/CTSpine1K/data/block/"
         path = os.path.join(block_root, name, f"block_{b_idx}.npz")
         
         # 读取一维数组 (N,)
@@ -317,7 +315,7 @@ class CBCT_dataset(Dataset):
         # 除以 (总长度 - 1)
         points[:, 0] /= (shape[0] - 1)
         points[:, 1] /= (shape[1] - 1)
-        points[:, 2] /= (shape[2] - 1)
+        points[:, 2] /= (shape[0] - 1)
         
         return points, sampled_values
 
@@ -342,7 +340,7 @@ class CBCT_dataset(Dataset):
             points = points.astype(np.float32)
             points[0] /= (self.out_res - 1) # X
             points[1] /= (self.out_res - 1) # Y
-            points[2] /= (real_z - 1)       # Z 
+            points[2] /= (self.out_res - 1) # Z 
             
             # 变形为 (N, 3)
             points = points.reshape(3, -1).transpose(1, 0)
@@ -357,14 +355,15 @@ class CBCT_dataset(Dataset):
             points, p_gt = self.get_coords_and_values(name, b_idx, block_values)
 
         # -- project points
+        max_z = self.z_lengths[name]/self.out_res
         proj_points = []
         for a in angles:
-            p = self.geo.project(points, a, scale_tensor=scale_vec)
+            p = self.geo.project(points, a, scale_tensor=scale_vec,max_z=max_z)
             proj_points.append(p)
         proj_points = np.stack(proj_points, axis=0) 
         points = deepcopy(points) 
         points[:, :2] -= 0.5 
-        points[:, 2] = -(points[:, 2] - np.max(points[:, 2])/2) 
+        points[:, 2] = -(points[:, 2] - max_z/2) 
         points *= 2 # => [-1, 1]
 
         angles = np.array(angles, dtype=float) 

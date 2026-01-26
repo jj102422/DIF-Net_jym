@@ -1,17 +1,16 @@
-import os
 import argparse
-import numpy as np
-import wandb
+import os
 
+import numpy as np
 import torch
+from dataset import Mixed_CBCT_dataset
+from evaluate import eval_one_epoch
+from models.model import DIF_Net
 from torch import nn
 from torch.utils.data import DataLoader
+from utils import add_argument, convert_cuda
 
-from dataset import Mixed_CBCT_dataset
-from models.model import DIF_Net
-from utils import convert_cuda, add_argument
-from evaluate import eval_one_epoch
-
+import wandb
 
 
 def worker_init_fn(worker_id):
@@ -24,8 +23,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
     wandb.init(
+        entity="jym20020918-",
         project="dif-net_CTSpine1K（6）", # 你的项目名称
-        name="baseline",         # 实验名称
+        name="baseline+角度调换+max_z+d_points[:, 0] *= -1+no_xray_norm+no_ct_clip+max2500hu",         # 实验名称
         config=args             # 记录所有超参数
     )
     
